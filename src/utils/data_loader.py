@@ -53,6 +53,7 @@ def split_text(text: str, chunk_size: int = 500, chunk_overlap: int = 50) -> lis
 def build_vectorstore(chunks: list, embeddings):
     """
     Tạo FAISS vectorstore từ danh sách chunks và embeddings.
+    Tự động cache vào thư mục data/faiss_cache để tái sử dụng, tiết kiệm quota API.
 
     Args:
         chunks    : list[str] — danh sách text chunks đã chia
@@ -63,7 +64,27 @@ def build_vectorstore(chunks: list, embeddings):
     """
     from langchain_community.vectorstores import FAISS
 
+    # Xác định cache directory theo model embedding để tránh lệch vector dimension
+    model_name = getattr(embeddings, "model", getattr(embeddings, "model_name", "default"))
+    safe_name = str(model_name).replace("/", "_").replace(":", "_")
+    cache_path = Path(__file__).parent.parent.parent / "data" / f"faiss_cache_{safe_name}"
+
+    if (cache_path / "index.faiss").exists():
+        try:
+            print(f"📦 Đang tải FAISS vectorstore từ cache ({cache_path.name}) ...")
+            return FAISS.load_local(str(cache_path), embeddings, allow_dangerous_deserialization=True)
+        except Exception as e:
+            print(f"⚠️ Không thể tải cache ({e}), đang tạo lại FAISS index...")
+
     print(f"🔨 Đang tạo FAISS index từ {len(chunks)} chunks ...")
     vectorstore = FAISS.from_texts(chunks, embeddings)
+
+    try:
+        cache_path.mkdir(parents=True, exist_ok=True)
+        vectorstore.save_local(str(cache_path))
+        print(f"💾 Đã lưu cache FAISS vào {cache_path.name}")
+    except Exception as e:
+        print(f"⚠️ Không thể lưu cache FAISS: {e}")
+
     print("✅ FAISS vectorstore đã sẵn sàng.")
     return vectorstore
